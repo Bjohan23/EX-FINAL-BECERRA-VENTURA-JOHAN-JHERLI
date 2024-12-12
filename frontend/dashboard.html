@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard - Sistema de Infracciones</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.6.2/axios.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-gray-100">
+    <!-- Navbar -->
+    <nav class="bg-blue-600 text-white p-4">
+      <div class="container mx-auto flex justify-between items-center">
+        <h1 class="text-xl font-bold">Sistema de Infracciones</h1>
+        <button onclick="logout()" class="bg-red-500 hover:bg-red-700 px-4 py-2 rounded">
+          Cerrar Sesión
+        </button>
+      </div>
+    </nav>
+
+    <!-- Contenido Principal -->
+    <main class="container mx-auto p-4">
+      <!-- Búsqueda y Filtros -->
+      <div class="bg-white p-4 rounded-lg shadow mb-4">
+        <div class="flex gap-4">
+          <input
+            type="text"
+            id="searchDni"
+            placeholder="Buscar por DNI"
+            class="border p-2 rounded flex-1"
+          />
+          <button
+            onclick="searchInfracciones()"
+            class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+          >
+            Buscar
+          </button>
+          <button
+            onclick="showAddModal()"
+            class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
+          >
+            Nueva Infracción
+          </button>
+        </div>
+      </div>
+
+      <!-- Tabla de Infracciones -->
+      <div class="bg-white rounded-lg shadow overflow-x-auto">
+        <table class="min-w-full">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">DNI</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fecha</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Placa</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Infracción
+              </th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Descripción
+              </th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Acciones
+              </th>
+            </tr>
+          </thead>
+          <tbody id="infraccionesTable" class="divide-y divide-gray-200">
+            <!-- Las filas se agregarán dinámicamente -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Paginación -->
+      <div class="flex justify-between items-center mt-4">
+        <div>
+          <span class="text-gray-600">Mostrando 1-10 de 100</span>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="previousPage()" class="px-4 py-2 border rounded hover:bg-gray-100">
+            Anterior
+          </button>
+          <button onclick="nextPage()" class="px-4 py-2 border rounded hover:bg-gray-100">
+            Siguiente
+          </button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Modal de Nueva/Editar Infracción -->
+    <div
+      id="infraccionModal"
+      class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center"
+    >
+      <div class="bg-white p-8 rounded-lg w-96">
+        <h2 id="modalTitle" class="text-2xl font-bold mb-4">Nueva Infracción</h2>
+        <input
+          type="text"
+          id="infraccionDni"
+          placeholder="DNI"
+          maxlength="8"
+          class="w-full border p-2 mb-4 rounded"
+        />
+        <input
+          type="text"
+          id="infraccionPlaca"
+          placeholder="Placa"
+          maxlength="7"
+          class="w-full border p-2 mb-4 rounded"
+        />
+        <input
+          type="text"
+          id="infraccionTipo"
+          placeholder="Tipo de Infracción"
+          class="w-full border p-2 mb-4 rounded"
+        />
+        <textarea
+          id="infraccionDescripcion"
+          placeholder="Descripción"
+          maxlength="255"
+          class="w-full border p-2 mb-4 rounded"
+        ></textarea>
+        <div class="flex justify-end gap-2">
+          <button
+            onclick="closeInfraccionModal()"
+            class="px-4 py-2 border rounded hover:bg-gray-100"
+          >
+            Cancelar
+          </button>
+          <button
+            onclick="saveInfraccion()"
+            class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          >
+            Guardar
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Variables globales
+      let currentPage = 0;
+      const pageSize = 10;
+      let currentInfraccionId = null;
+
+      // Configuración de Axios
+      const api = axios.create({
+        baseURL: "http://localhost:8090",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      api.interceptors.request.use(
+        (config) => {
+          const token = localStorage.getItem("token");
+          if (token) {
+            config.headers["Authorization"] = `Bearer ${token}`;
+          }
+          // Asegurar que siempre se envíen estos headers
+          config.headers["Access-Control-Allow-Origin"] = "*";
+          return config;
+        },
+        (error) => {
+          return Promise.reject(error);
+        }
+      );
+      // Interceptor de respuestas
+      api.interceptors.response.use(
+        (response) => response,
+        (error) => {
+          if (error.response) {
+            switch (error.response.status) {
+              case 401:
+                console.log("Token expirado o inválido");
+                localStorage.removeItem("token");
+                window.location.href = "login.html";
+                break;
+              case 403:
+                console.log("Acceso prohibido");
+                // Intentar renovar el token o redirigir al login
+                localStorage.removeItem("token");
+                window.location.href = "login.html";
+                break;
+              default:
+                console.error("Error en la respuesta:", error.response.data);
+                alert(error.response.data.message || "Error en la operación");
+            }
+          } else if (error.request) {
+            console.error("Error de red:", error.request);
+            alert("Error de conexión con el servidor");
+          } else {
+            console.error("Error:", error.message);
+            alert("Error en la configuración de la petición");
+          }
+          return Promise.reject(error);
+        }
+      );
+      // Función para cerrar sesión
+      function logout() {
+        localStorage.removeItem("token");
+        window.location.href = "login.html";
+      }
+      // Función para verificar la autenticación
+      function checkAuth() {
+        const token = localStorage.getItem("token");
+        if (!token) {
+          window.location.href = "login.html";
+          return false;
+        }
+        return true;
+      }
+
+      // Agregar esto al inicio de cada función que haga peticiones al servidor
+      async function loadInfracciones() {
+        if (!checkAuth()) return;
+
+        try {
+          const response = await api.get(
+            `/v1/infracciones?offset=${currentPage}&limit=${pageSize}`
+          );
+          if (response.data && response.data.body) {
+            updateTable(response.data.body);
+            updatePagination(response.data.body.length);
+          }
+        } catch (error) {
+          console.error("Error al cargar infracciones:", error);
+        }
+      }
+      // Función para actualizar la tabla
+      function updateTable(infracciones) {
+        const tableBody = document.getElementById("infraccionesTable");
+        tableBody.innerHTML = "";
+
+        infracciones.forEach((infraccion) => {
+          const fecha = infraccion.fecha ? new Date(infraccion.fecha).toLocaleDateString() : "";
+          const row = `
+            <tr class="hover:bg-gray-50">
+                <td class="px-6 py-4">${infraccion.dni || ""}</td>
+                <td class="px-6 py-4">${fecha}</td>
+                <td class="px-6 py-4">${infraccion.placa || ""}</td>
+                <td class="px-6 py-4">${infraccion.infracción || ""}</td>
+                <td class="px-6 py-4">${infraccion.descripcion || ""}</td>
+                <td class="px-6 py-4">
+                    <button onclick="editInfraccion(${infraccion.id})" 
+                            class="text-blue-600 hover:text-blue-900 mr-2">
+                        Editar
+                    </button>
+                    <button onclick="deleteInfraccion(${infraccion.id})" 
+                            class="text-red-600 hover:text-red-900">
+                        Eliminar
+                    </button>
+                </td>
+            </tr>
+        `;
+          tableBody.innerHTML += row;
+        });
+      }
+
+      // Función para actualizar la paginación
+      function updatePagination(totalItems) {
+        const totalPages = Math.ceil(totalItems / pageSize);
+        document.getElementById("paginationInfo").textContent = `Página ${
+          currentPage + 1
+        } de ${totalPages}`;
+
+        // Habilitar/deshabilitar botones de paginación
+        document.getElementById("prevButton").disabled = currentPage === 0;
+        document.getElementById("nextButton").disabled = currentPage >= totalPages - 1;
+      }
+
+      // Funciones de paginación
+      function nextPage() {
+        currentPage++;
+        loadInfracciones();
+      }
+
+      function previousPage() {
+        if (currentPage > 0) {
+          currentPage--;
+          loadInfracciones();
+        }
+      }
+
+      // Función para buscar infracciones
+      async function searchInfracciones() {
+        const dni = document.getElementById("searchDni").value.trim();
+        try {
+          const response = await api.get(
+            `/v1/infracciones/search?dni=${dni}&offset=${currentPage}&limit=${pageSize}`
+          );
+          if (response.data && response.data.body) {
+            updateTable(response.data.body);
+            updatePagination(response.data.body.length);
+          }
+        } catch (error) {
+          console.error("Error en la búsqueda:", error);
+        }
+      }
+
+      // Funciones para el modal
+      function showAddModal() {
+        resetModalForm();
+        document.getElementById("modalTitle").textContent = "Nueva Infracción";
+        document.getElementById("infraccionModal").classList.remove("hidden");
+      }
+
+      function closeInfraccionModal() {
+        document.getElementById("infraccionModal").classList.add("hidden");
+        resetModalForm();
+      }
+
+      function resetModalForm() {
+        currentInfraccionId = null;
+        document.getElementById("infraccionDni").value = "";
+        document.getElementById("infraccionPlaca").value = "";
+        document.getElementById("infraccionTipo").value = "";
+        document.getElementById("infraccionDescripcion").value = "";
+      }
+
+      // Función para guardar infracción
+      async function saveInfraccion() {
+        const infraccionData = {
+          dni: document.getElementById("infraccionDni").value.trim(),
+          placa: document.getElementById("infraccionPlaca").value.trim(),
+          infracción: document.getElementById("infraccionTipo").value.trim(),
+          descripcion: document.getElementById("infraccionDescripcion").value.trim(),
+          fecha: new Date(),
+        };
+
+        // Validaciones
+        if (!validateInfraccionData(infraccionData)) {
+          return;
+        }
+
+        try {
+          if (currentInfraccionId) {
+            infraccionData.id = currentInfraccionId;
+            await api.put(`/v1/infracciones/${currentInfraccionId}`, infraccionData);
+          } else {
+            await api.post("/v1/infracciones", infraccionData);
+          }
+          closeInfraccionModal();
+          loadInfracciones();
+        } catch (error) {
+          console.error("Error al guardar la infracción:", error);
+        }
+      }
+
+      // Función de validación
+      function validateInfraccionData(data) {
+        if (!data.dni || data.dni.length > 8) {
+          alert("El DNI es requerido y debe tener máximo 8 caracteres");
+          return false;
+        }
+        if (!data.placa || data.placa.length > 7) {
+          alert("La placa es requerida y debe tener máximo 7 caracteres");
+          return false;
+        }
+        if (!data.infracción) {
+          alert("El tipo de infracción es requerido");
+          return false;
+        }
+        if (!data.descripcion || data.descripcion.length > 255) {
+          alert("La descripción es requerida y debe tener máximo 255 caracteres");
+          return false;
+        }
+        return true;
+      }
+
+      // Función para editar infracción
+      async function editInfraccion(id) {
+        try {
+          const response = await api.get(`/v1/infracciones/${id}`);
+          const infraccion = response.data.body;
+
+          currentInfraccionId = id;
+          document.getElementById("infraccionDni").value = infraccion.dni || "";
+          document.getElementById("infraccionPlaca").value = infraccion.placa || "";
+          document.getElementById("infraccionTipo").value = infraccion.infracción || "";
+          document.getElementById("infraccionDescripcion").value = infraccion.descripcion || "";
+
+          document.getElementById("modalTitle").textContent = "Editar Infracción";
+          document.getElementById("infraccionModal").classList.remove("hidden");
+        } catch (error) {
+          console.error("Error al cargar la infracción:", error);
+        }
+      }
+
+      // Función para eliminar infracción
+      async function deleteInfraccion(id) {
+        if (!confirm("¿Está seguro de eliminar esta infracción?")) {
+          return;
+        }
+
+        try {
+          await api.delete(`/v1/infracciones/${id}`);
+          loadInfracciones();
+        } catch (error) {
+          console.error("Error al eliminar la infracción:", error);
+        }
+      }
+
+      // Event Listeners
+      document.addEventListener("DOMContentLoaded", () => {
+        const token = localStorage.getItem("token");
+        if (!token) {
+          window.location.href = "login.html";
+          return;
+        }
+        loadInfracciones();
+
+        // Añadir listener para la tecla Enter en el campo de búsqueda
+        document.getElementById("searchDni").addEventListener("keypress", (e) => {
+          if (e.key === "Enter") {
+            searchInfracciones();
+          }
+        });
+      });
+
+      // Manejar clic fuera del modal para cerrarlo
+      document.addEventListener("click", (e) => {
+        const modal = document.getElementById("infraccionModal");
+        const modalContent = modal.querySelector(".bg-white");
+        if (e.target === modal) {
+          closeInfraccionModal();
+        }
+      });
+    </script>
+  </body>
+</html>
